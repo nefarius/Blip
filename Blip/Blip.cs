@@ -176,6 +176,7 @@ namespace Blip
             }
         }
 
+        /// <inheritdoc />
         /// <summary>
         ///     Register a delegate as an RPC delegate with this server.
         /// </summary>
@@ -213,7 +214,7 @@ namespace Blip
                 request = JsonConvert.DeserializeObject<BlipRequest>(jsonMessage);
                 request.Validate();
             }
-            catch (Exception e)
+            catch (Exception)
             {
                 LogWarning?.Invoke(this, "Dropped bad Blip request from " + client.ConnectionInfo.ClientIpAddress);
                 return;
