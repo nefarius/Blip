@@ -12,6 +12,7 @@
     <RootNamespace>Blip</RootNamespace>
     <AssemblyName>Blip</AssemblyName>
     <FileAlignment>512</FileAlignment>
+    <Company>Hardy &amp; Ellis Inventions LTD</Company>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
