@@ -7,7 +7,7 @@ A *JavaScript* client wrapper and *C#* server implementation are provided.
 
 ![Blip](https://img.shields.io/badge/nuget-v0.0.2.5-blue.svg)
 
-#Client Usage:
+## Client Usage:
 ```javascript
 // Create Blip client wrapper around a websocket.
 var ws = new WebSocket("ws://127.0.0.1:9224");
@@ -32,7 +32,7 @@ ws.onopen = function () {
 }
 ```
 
-#Server Usage:
+## Server Usage:
 ```c#
 using Blip;
 
