@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Fleck;
+using JetBrains.Annotations;
 using Newtonsoft.Json;
 
 namespace Blip
@@ -24,7 +25,7 @@ namespace Blip
         /// <summary>
         ///     Create a new blip service.
         /// </summary>
-        public Blip()
+        protected Blip()
         {
             RegisteredServices = new Dictionary<string, Delegate>();
         }
@@ -43,11 +44,10 @@ namespace Blip
         public virtual void Register(string target, Delegate function)
         {
             // Sanity check.
-            if (string.IsNullOrWhiteSpace(target)) throw new ArgumentNullException("RPC target cannot be null");
-            if (function == null) throw new ArgumentNullException("RPC delegate cannot be null");
+            if (string.IsNullOrWhiteSpace(target)) throw new ArgumentNullException(nameof(target));
 
             // Place in the registered table.
-            RegisteredServices[target] = function;
+            RegisteredServices[target] = function ?? throw new ArgumentNullException(nameof(function));
         }
 
         /// <summary>
@@ -65,10 +65,11 @@ namespace Blip
         ///     Publish data to a topic. This will be sent to all connected subscribers.
         /// </summary>
         /// <param name="topic">The name of the topic to publish too.</param>
-        /// <param name="data">The arguments to push to the topic.</param>
+        /// <param name="arguments">The arguments to push to the topic.</param>
         public abstract void Publish(string topic, params object[] arguments);
     }
 
+    /// <inheritdoc cref="Blip" />
     /// <summary>
     ///     Super lightweight RPC / PUBSUB server using Fleck as a WebSocket transport layer.
     /// </summary>
@@ -100,13 +101,13 @@ namespace Blip
         /// <summary>
         ///     Table of currently connected clients.
         /// </summary>
-        private readonly List<IWebSocketConnection> Clients;
+        private readonly List<IWebSocketConnection> _clients;
 
         /// <summary>
         ///     Types that are not permissable as dynamic type conversions from JSON.
         ///     These cannot be parameters in registered services.
         /// </summary>
-        private readonly string[] DisallowedTypes =
+        private readonly string[] _disallowedTypes =
         {
             typeof(int).FullName, typeof(float).FullName, typeof(float).FullName, typeof(byte).FullName,
             typeof(short).FullName
@@ -115,47 +116,49 @@ namespace Blip
         /// <summary>
         ///     Reference to the websocket server.
         /// </summary>
-        private WebSocketServer Server;
+        private WebSocketServer _server;
 
+        /// <inheritdoc />
         /// <summary>
         ///     Create a new BlipWebSocket.
         /// </summary>
         /// <param name="location">The location to create the service at. For example, a websocket woud be: ws://0.0.0.0:1234/hello</param>
         public BlipWebSocket(string location)
         {
-            Clients = new List<IWebSocketConnection>();
-            Server = new WebSocketServer(location);
-            Server.Start(socket =>
+            _clients = new List<IWebSocketConnection>();
+            _server = new WebSocketServer(location);
+            _server.Start(socket =>
             {
                 socket.OnOpen = () =>
                 {
-                    lock (Clients)
+                    lock (_clients)
                     {
-                        Clients.Add(socket);
+                        _clients.Add(socket);
                     }
                 };
                 socket.OnClose = () =>
                 {
-                    lock (Clients)
+                    lock (_clients)
                     {
-                        Clients.Remove(socket);
+                        _clients.Remove(socket);
                     }
                 };
                 socket.OnError = e =>
                 {
-                    lock (Clients)
+                    lock (_clients)
                     {
-                        Clients.Remove(socket);
+                        _clients.Remove(socket);
                     }
                 };
                 socket.OnMessage = data => { HandleMessage(socket, data); };
             });
         }
 
+        /// <inheritdoc />
         /// <summary>
         ///     Location of this Blip service as a string. For example, a websocket woud be: ws://0.0.0.0:1234/hello
         /// </summary>
-        public override string Location => Server.Location;
+        public override string Location => _server.Location;
 
         /// <summary>
         ///     Tear down this server and free memory.
@@ -163,14 +166,13 @@ namespace Blip
         public void Dispose()
         {
             // Tear down server.
-            if (Server != null)
-                Server.Dispose();
-            Server = null;
+            _server?.Dispose();
+            _server = null;
 
             // Clear clients.
-            lock (Clients)
+            lock (_clients)
             {
-                Clients.Clear();
+                _clients.Clear();
             }
         }
 
@@ -183,14 +185,14 @@ namespace Blip
         public override void Register(string target, Delegate function)
         {
             // Sanity.
-            if (function == null) throw new ArgumentNullException("RPC delegate cannot be null");
+            if (function == null) throw new ArgumentNullException(nameof(function));
 
             // Check method does not contain Int32 or float parameters.
             var args = function.Method.GetParameters();
-            var errors = args.Count(p => DisallowedTypes.Contains(p.ParameterType.FullName));
+            var errors = args.Count(p => _disallowedTypes.Contains(p.ParameterType.FullName));
             if (errors > 0)
                 throw new Exception("BlipWebSocket cannot support parameters with type: " +
-                                    string.Join(", ", DisallowedTypes.Select(t => t.ToString())));
+                                    string.Join(", ", _disallowedTypes.Select(t => t.ToString())));
 
             // Base.
             base.Register(target, function);
@@ -205,7 +207,7 @@ namespace Blip
         private void HandleMessage(IWebSocketConnection client, string jsonMessage)
         {
             // Convert to BlipRequest.
-            BlipRequest request = null;
+            BlipRequest request;
             try
             {
                 request = JsonConvert.DeserializeObject<BlipRequest>(jsonMessage);
@@ -213,18 +215,15 @@ namespace Blip
             }
             catch (Exception e)
             {
-                if (LogWarning != null)
-                    LogWarning(this, "Dropped bad Blip request from " + client.ConnectionInfo.ClientIpAddress);
+                LogWarning?.Invoke(this, "Dropped bad Blip request from " + client.ConnectionInfo.ClientIpAddress);
                 return;
             }
 
             // Locate target delegate.
-            Delegate target;
-            if (!RegisteredServices.TryGetValue(request.Target, out target))
+            if (!RegisteredServices.TryGetValue(request.Target, out var target))
             {
-                if (LogWarning != null)
-                    LogWarning(this,
-                        "Missing RPC registered handler for target from " + client.ConnectionInfo.ClientIpAddress);
+                LogWarning?.Invoke(this,
+                    "Missing RPC registered handler for target from " + client.ConnectionInfo.ClientIpAddress);
                 return;
             }
 
@@ -257,20 +256,21 @@ namespace Blip
             DispatchData(client, responseJson);
         }
 
+        /// <inheritdoc />
         /// <summary>
         ///     Publish data to a topic. This will be sent to all connected subscribers.
         /// </summary>
         /// <param name="topic">The name of the topic to publish too.</param>
-        /// <param name="data">The arguments to push to the topic.</param>
+        /// <param name="arguments">The arguments to push to the topic.</param>
         public override void Publish(string topic, params object[] arguments)
         {
             // Prepare response.
             var topicJson = JsonConvert.SerializeObject(new BlipPublish {Topic = topic, Arguments = arguments});
 
             // For each client.
-            lock (Clients)
+            lock (_clients)
             {
-                foreach (var client in Clients)
+                foreach (var client in _clients)
                     DispatchData(client, topicJson);
             }
         }
@@ -286,21 +286,21 @@ namespace Blip
             {
                 client.Send(data);
             }
-            catch (Exception e)
+            catch (Exception)
             {
-                if (LogWarning != null)
-                    LogWarning(this, "Error sending data to " + client.ConnectionInfo.ClientIpAddress);
+                LogWarning?.Invoke(this, "Error sending data to " + client.ConnectionInfo.ClientIpAddress);
             }
         }
 
         #region Message Packets
 
         /// <summary>Used to parse incoming message requests.</summary>
+        [UsedImplicitly]
         private class BlipRequest
         {
-            public object[] Arguments;
-            public string Call;
-            public string Target;
+            public object[] Arguments { get; set; }
+            public string Call { get; set; }
+            public string Target { get; set; }
 
             public void Validate()
             {
@@ -314,16 +314,16 @@ namespace Blip
         /// <summary>Returned to callers after an RPC call.</summary>
         private class BlipResponse
         {
-            public object Result; // The result of the server request.
-            public bool Success; // Did the server request complete sucessfully.
-            public string Target; // The callback target on the client.
+            public object Result { get; set; } // The result of the server request.
+            public bool Success { get; set; } // Did the server request complete sucessfully.
+            public string Target { get; set; } // The callback target on the client.
         }
 
         /// <summary>Sent to all clients as subscribers</summary>
         private class BlipPublish
         {
-            public object[] Arguments;
-            public string Topic;
+            public object[] Arguments { get; set; }
+            public string Topic { get; set; }
         }
 
         #endregion
